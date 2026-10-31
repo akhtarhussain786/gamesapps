@@ -8,49 +8,47 @@ A high-octane, portrait pseudo-3D mobile arcade game running at a fluid 60 FPS, 
 
 ## 🎮 Gameplay & Mechanics
 
-- **Auto-Cruise Acceleration**: The electric roadster accelerates forward along a winding pseudo-3D highway. Forward speed increases with each level.
-- **Virtual Joystick (Left Side)**:
-  - **Steering**: Move left/right to weave through lanes with real-time camera banking and vehicle roll.
-  - **Nose / Pitch Control**: When airborne, tilt forward to dive or backward to climb/glide.
-- **Flight Thrusters & AIR Meter (Bottom-Right)**:
-  - **Big "FLY" Button**: Hold to ignite dual twin plasma thrusters, lifting the car into the air to fly clean over obstacle piles.
-  - **AIR Meter**: Depletes while airborne (indicated by the neon cyan circular gauge); refills automatically when driving on asphalt.
-- **Stunt Flip Button (Yellow)**:
-  - While airborne, tap the **FLIP** button to perform a 360° stunt backflip for **+500 BONUS POINTS**!
-- **Traffic Piles & Overpass System**:
-  - Piles of parked, abandoned, and stacked cars (in white, blue, red, and black) obstruct lanes.
-  - Colliding on the ground triggers a crash with slow-motion and screen shake.
-  - Flying high enough allows you to pass safely overhead with an **OVERPASS BONUS (+200)**.
-- **Dynamic Landing Zone Indicator**:
-  - When airborne, a predictive targeting ring projects onto the road surface ahead.
-  - **Green Ring**: Projected touchdown is in a safe open gap. Touching down earns a **LANDING BONUS (+300)**.
-  - **Red Ring**: Projected touchdown overlaps a vehicle stack or goes off-road. Landing here causes a crash!
-- **Tactical Status Chips**:
-  - Live HUD alerts below the stats panel: `"STACK AHEAD 25M"`, `"HOLD FLY"`, `"LANDING GOOD"`, `"NOSE DOWN"`, etc.
-- **Levels & Gantries**:
-  - Every 500 meters, cross under an illuminated finish-line gantry with stadium lights, unlocking the next level with higher speed and denser traffic.
+- **Hold to Drive**: Keep any finger on the screen to accelerate; let go and the roadster brakes to a stop. Top speed rises with each level.
+- **Steer Pad (Left Thumb)**: Slide left/right to change lanes. The car rolls into the turn and shows a sliver of its flank.
+- **FLY Button & AIR Gauge (Bottom-Right)**:
+  - **Hold FLY** to fire the twin plasma thrusters in the rear diffuser and lift off.
+  - The **AIR** ring around the button drains while flying and refills on the road. It turns red when low.
+  - When a pile in your lane needs clearing *now*, the button pulses red and the HUD shows **FLY NOW!**
+- **FLIP Button (Magenta)**: While airborne, tap for a 360° backflip. **+50** points when the rotation completes; landing mid-flip earns nothing.
+- **Traffic Piles**:
+  - Abandoned cars (white, blue, red, black) block one or two lanes. Higher levels stack them up to three high, and every raised car sits on another car.
+  - Touching a pile ends the run (slow-motion crash and screen shake).
+  - Fly above the top of a pile for **+200 per car** cleared.
+- **Landing Reticle**: While airborne, a ring on the road shows where you would touch down if you released FLY now.
+  - **Green**: clear road. **Red**: a pile is there, so keep flying.
+  - A touchdown after clearing at least one pile earns a **CLEAN LANDING +300**.
+- **HUD Feedback**:
+  - One alert chip below the HUD for warnings (`PILE AHEAD 86M · 2 HIGH`, `FLY NOW!`, `HAZARD BELOW · HOLD FLY`, `AIR DEPLETED`). A more urgent alert is never hidden by a less urgent one.
+  - Rewards (`+200 OVERPASS`, `+50 FLIP`, `LEVEL 2 · SPEED UP`) float up from above the car, separately from warnings.
+- **Levels & Gantries**: Every 500 m you pass under a finish-line gantry and move up a level with more speed and denser traffic.
+- **Auto-pause**: The game pauses itself when the app is backgrounded.
 
 ---
 
 ## 🎨 Visual Style
 
-- **100% Procedural Vector Graphics**: No external images, sprites, or textures are required! All visuals are drawn directly with Flutter Canvas and vector paths for ultra-crisp resolution on any display.
-- **Low-Poly / Voxel City Skyline**: Multi-layered parallax skyscrapers in blue, orange, and steel grey tones with glowing windows and flashing beacon spires.
-- **Pseudo-3D Perspective Road**: Vanishing point at the horizon with projected depth scaling, alternating red/white rumble curbs, dark asphalt, emerald grass verges, and spectator grandstands full of animated pixel crowd.
-- **Cyberpunk UI**: Neon cyan/aqua accents, dark translucent glassmorphism panels, and monospace LCD figures.
+- **Procedural Vector Graphics**: No images, sprites or textures. Everything is drawn with Flutter Canvas paths, so it stays crisp on any display.
+- **Player Roadster**: A low, wide magenta electric roadster with visible tyres, a tinted canopy, twin fairings, a GT wing, a full-width LED light bar and glowing thruster nozzles. Traffic is deliberately plain boxy sedans, so your car is always easy to spot.
+- **Pseudo-3D Road**: OutRun-style projection with rumble curbs, grandstands and a parallax city skyline. The player car is placed using the same projection as the road and traffic, so what you see is what collides.
+- **UI**: Bundled fonts (Russo One for headings, Rajdhani for labels, Share Tech Mono for numbers) look the same on every platform. Each colour has one meaning: cyan = systems/info, magenta = your car & stunts, amber = caution, red = danger, green = rewards.
 
 ---
 
 ## 📁 Project Architecture
 
 ```
-d:\GAME APP BUILD\
+gamesapps/
 ├── lib/
 │   ├── main.dart                      # Orientation lock & app entrypoint
 │   ├── core/
 │   │   ├── constants.dart             # World geometry, physics & scoring constants
 │   │   ├── theme.dart                 # Cyberpunk palette, glass panels & LCD styles
-│   │   ├── audio_manager.dart         # Engine simulation, SFX chimes & haptics
+│   │   ├── audio_manager.dart         # SFX & haptics (respects the sound toggle)
 │   │   └── game_state.dart            # Reactive ValueNotifier-driven game controller
 │   ├── screens/
 │   │   ├── splash_screen.dart         # Radial glow, 12-block loader & start prompt
@@ -61,16 +59,21 @@ d:\GAME APP BUILD\
 │   │   └── components/
 │   │       ├── skyline_horizon.dart   # Voxel city horizon & twilight gradient
 │   │       ├── road_mesh.dart         # Pseudo-3D curved road & finish gantries
-│   │       ├── player_car.dart        # Vector roadster, plasma thrusters & flips
-│   │       ├── traffic_cluster.dart   # Object-pooled obstacle clusters
+│   │       ├── player_car.dart        # Player pose, shadow, roll, thrusters & flips
+│   │       ├── roadster_painter.dart  # Vector artwork for the player's roadster
+│   │       ├── car_renderer.dart      # Rear-view traffic sedan
+│   │       ├── traffic_cluster.dart   # Stacked traffic piles & hit tests
 │   │       ├── landing_target.dart    # Real-time predictive landing reticle
 │   │       └── particles.dart         # Object-pooled thruster sparks & debris
 │   └── widgets/
-│       ├── hud_overlay.dart           # LCD score, level, progress bar & pause
-│       ├── virtual_joystick.dart      # Left thumb steering & pitch control
+│       ├── hud_overlay.dart           # Score, level progress, distance, speed & pause
+│       ├── virtual_joystick.dart      # Left-thumb horizontal steer pad
 │       ├── flight_controls.dart       # FLY button with AIR ring & FLIP button
-│       ├── status_chips_overlay.dart  # Tactical alert chips with colored dots
+│       ├── status_chips_overlay.dart  # Prioritised alert chip
+│       ├── score_popups_overlay.dart  # Floating reward popups
 │       └── pause_dialog.dart          # Glassmorphism pause menu
+├── assets/fonts/                      # Bundled OFL fonts + licences
+├── test/game_logic_test.dart          # Logic tests (bonuses, piles, hit boxes, projection)
 ├── pubspec.yaml                       # Dependencies: flame, flame_audio, shared_preferences
 └── README.md
 ```
@@ -87,7 +90,12 @@ d:\GAME APP BUILD\
 flutter pub get
 ```
 
-### 2. Run the Game
+### 2. Run the Tests
+```bash
+flutter test
+```
+
+### 3. Run the Game
 - **Android Device / Emulator**:
   ```bash
   flutter run -d android

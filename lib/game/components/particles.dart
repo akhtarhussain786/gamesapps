@@ -52,39 +52,46 @@ class ParticleManager {
     return null;
   }
 
-  void emitThrusterSparks({required double screenX, required double screenY, required int count}) {
+  void emitThrusterSparks({required Offset left, required Offset right, required int count}) {
     for (int i = 0; i < count; i++) {
       final p = _getFreeParticle();
       if (p == null) break;
 
+      final Offset origin = _random.nextBool() ? left : right;
       p.active = true;
       p.type = ParticleType.plasmaSpark;
-      final double sideOffset = (_random.nextBool() ? -44.0 : 44.0) + (_random.nextDouble() * 12.0 - 6.0);
-      p.x = screenX + sideOffset;
-      p.y = screenY + 28.0;
+      p.x = origin.dx + (_random.nextDouble() * 8.0 - 4.0);
+      p.y = origin.dy + 4.0;
       p.vx = (_random.nextDouble() - 0.5) * 80.0;
       p.vy = 140.0 + _random.nextDouble() * 220.0;
-      p.size = 2.0 + _random.nextDouble() * 3.5;
+      p.size = 1.5 + _random.nextDouble() * 3.0;
       p.maxLife = 0.22 + _random.nextDouble() * 0.25;
       p.life = p.maxLife;
       p.color = _random.nextBool() ? GameConstants.neonCyan : Colors.white;
     }
   }
 
-  void emitTireSmoke({required double screenX, required double screenY, required double steerInput}) {
-    if (steerInput.abs() < 0.25 && _random.nextDouble() > 0.3) return;
+  void emitTireSmoke({
+    required double screenX,
+    required double groundY,
+    required double carWidth,
+    required double steerInput,
+  }) {
+    // Drift smoke only while actually turning.
+    if (steerInput.abs() < 0.25 || _random.nextDouble() > 0.6) return;
 
     final p = _getFreeParticle();
     if (p == null) return;
 
     p.active = true;
     p.type = ParticleType.tireSmoke;
-    final double wheelOffset = (steerInput > 0 ? -65.0 : 65.0);
+    // Smoke comes off the outside rear tyre of the turn.
+    final double wheelOffset = (steerInput > 0 ? -0.42 : 0.42) * carWidth;
     p.x = screenX + wheelOffset + (_random.nextDouble() * 10.0 - 5.0);
-    p.y = screenY + 22.0;
+    p.y = groundY - 4.0;
     p.vx = -steerInput * 45.0 + (_random.nextDouble() * 30.0 - 15.0);
-    p.vy = -10.0 - _random.nextDouble() * 25.0;
-    p.size = 8.0 + _random.nextDouble() * 12.0;
+    p.vy = 20.0 + _random.nextDouble() * 30.0;
+    p.size = carWidth * (0.05 + _random.nextDouble() * 0.06);
     p.maxLife = 0.35 + _random.nextDouble() * 0.25;
     p.life = p.maxLife;
     p.color = const Color(0x66B0BEC5);
@@ -178,7 +185,8 @@ class ParticleManager {
           particlePaint
             ..color = p.color.withValues(alpha: lifeRatio * 0.75)
             ..strokeWidth = p.size
-            ..strokeCap = StrokeCap.round;
+            ..strokeCap = StrokeCap.round
+            ..maskFilter = null;
           const double lineLen = 32.0;
           final double len = math.sqrt(p.vx * p.vx + p.vy * p.vy);
           final double dx = (len > 0) ? (p.vx / len) * lineLen : 0;

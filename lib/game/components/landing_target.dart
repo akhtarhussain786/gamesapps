@@ -4,10 +4,12 @@ import '../../core/constants.dart';
 import 'road_mesh.dart';
 import 'traffic_cluster.dart';
 
-/// Real-time projected landing zone ring on the road surface at predicted landing Z.
+/// Predicts where the car would touch down if FLY were released now, and
+/// draws a reticle on the road there (green = clear, red = pile).
 class LandingTarget {
   double predictedLandingZ = 0.0;
   bool isSafe = true;
+  bool isActive = false;
   double _reticleSpin = 0.0;
   double _pulseTimer = 0.0;
 
@@ -15,42 +17,30 @@ class LandingTarget {
     required double dt,
     required double playerWx,
     required double playerWy,
-    required double camZ,
-    required double speed,
+    required double playerVy,
+    required double playerWz,
+    required double worldSpeed,
     required TrafficManager trafficManager,
   }) {
     _reticleSpin += dt * 3.5;
     _pulseTimer += dt * 6.0;
 
-    if (playerWy <= 20.0) {
+    isActive = playerWy > GameConstants.airborneThreshold;
+    if (!isActive) {
       isSafe = true;
       return;
     }
 
-    // Predict touchdown Z based on gravity descent
-    final double timeToLand = math.sqrt((2.0 * playerWy) / GameConstants.flightGravity);
-    predictedLandingZ = camZ + 800.0 + (speed * timeToLand);
+    // Ballistic fall from the current height and vertical speed:
+    // y(t) = h + vy*t - g*t²/2 = 0  ->  t = (vy + sqrt(vy² + 2gh)) / g
+    const double g = GameConstants.flightGravity;
+    final double vy = playerVy;
+    final double timeToLand = (vy + math.sqrt(vy * vy + 2.0 * g * playerWy)) / g;
+    predictedLandingZ = playerWz + worldSpeed * timeToLand;
 
-    // 1. Off-road check
-    if (playerWx.abs() > GameConstants.roadHalfWidth * 0.88) {
-      isSafe = false;
-      return;
-    }
-
-    // 2. Obstacle collision check
-    bool hitTraffic = false;
-    for (final car in trafficManager.cars) {
-      final double dz = (car.wz - predictedLandingZ).abs();
-      if (dz < 160.0) {
-        final double dx = (car.wx - playerWx).abs();
-        if (dx < 280.0) {
-          hitTraffic = true;
-          break;
-        }
-      }
-    }
-
-    isSafe = !hitTraffic;
+    final bool offRoad = playerWx.abs() > GameConstants.roadHalfWidth * 0.88;
+    final bool blocked = trafficManager.isLandingBlocked(playerWx: playerWx, landingZ: predictedLandingZ);
+    isSafe = !offRoad && !blocked;
   }
 
   void render({
@@ -60,79 +50,63 @@ class LandingTarget {
     required double camZ,
     required double horizonY,
     required double playerWx,
-    required double playerWy,
     required RoadMesh roadMesh,
   }) {
-    // Only visible when airborne
-    if (playerWy <= 20.0) return;
-
-    const double camH = GameConstants.cameraHeight;
-    const double camDepth = GameConstants.cameraDepth;
+    if (!isActive) return;
 
     final pt = roadMesh.project(
       wx: playerWx,
-      wy: 0.0, // On the road surface
+      wy: 0.0,
       wz: predictedLandingZ,
       size: size,
       camX: camX,
-      camH: camH,
+      camH: GameConstants.cameraHeight,
       camZ: camZ,
-      camDepth: camDepth,
+      camDepth: GameConstants.cameraDepth,
       horizonY: horizonY,
     );
-
     if (pt == null || pt.scale <= 0) return;
 
-    final double w = pt.scale * 800.0 * (size.width * 0.5);
+    final double w = pt.scale * GameConstants.playerCarWidth * 1.15 * (size.width * 0.5);
     if (w < 4.0) return;
 
-    final double h = w * 0.32;
+    final double h = w * 0.3;
     final Color ringColor = isSafe ? GameConstants.neonGreen : GameConstants.neonRed;
-    final double pulse = 0.88 + 0.12 * math.sin(_pulseTimer);
+    final double pulse = 0.9 + 0.1 * math.sin(_pulseTimer);
+    final Rect ringRect = Rect.fromCenter(center: Offset(pt.x, pt.y), width: w * pulse, height: h * pulse);
+    final double stroke = math.max(1.6, w * 0.025);
 
-    // Outer glow
-    final Paint glowPaint = Paint()
-      ..color = ringColor.withValues(alpha: 0.45 * pulse)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.0, pt.scale * 16.0)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, math.max(2.0, pt.scale * 12.0));
-
-    // Core crisp ring
-    final Paint ringPaint = Paint()
-      ..color = ringColor.withValues(alpha: 0.95)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.8, pt.scale * 8.0);
-
-    // Fill highlight
-    final Paint fillPaint = Paint()
-      ..color = ringColor.withValues(alpha: 0.12 * pulse)
-      ..style = PaintingStyle.fill;
-
-    final Rect ringRect = Rect.fromCenter(
-      center: Offset(pt.x, pt.y),
-      width: w * pulse,
-      height: h * pulse,
+    canvas.drawOval(ringRect, Paint()..color = ringColor.withValues(alpha: 0.14 * pulse));
+    canvas.drawOval(
+      ringRect,
+      Paint()
+        ..color = ringColor.withValues(alpha: 0.5 * pulse)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke * 2.2
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, stroke * 1.5),
+    );
+    canvas.drawOval(
+      ringRect,
+      Paint()
+        ..color = ringColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
     );
 
-    canvas.drawOval(ringRect, fillPaint);
-    canvas.drawOval(ringRect, glowPaint);
-    canvas.drawOval(ringRect, ringPaint);
-
-    // Rotating crosshairs
+    // Rotating tick marks (drawn in a squashed space so they lie on the road)
     final Paint tickPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.85)
-      ..strokeWidth = math.max(1.5, pt.scale * 5.0);
-
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
     canvas.save();
     canvas.translate(pt.x, pt.y);
-    canvas.rotate(_reticleSpin);
-
-    final double tickX = (w * 0.5) * 0.28;
-    canvas.drawLine(Offset(-w * 0.5, 0), Offset(-w * 0.5 + tickX, 0), tickPaint);
-    canvas.drawLine(Offset(w * 0.5, 0), Offset(w * 0.5 - tickX, 0), tickPaint);
-    canvas.drawLine(Offset(0, -h * 0.5), Offset(0, -h * 0.5 + tickX * 0.35), tickPaint);
-    canvas.drawLine(Offset(0, h * 0.5), Offset(0, h * 0.5 - tickX * 0.35), tickPaint);
-
+    canvas.scale(1.0, h / w);
+    final double r = w * 0.5 * pulse;
+    for (int i = 0; i < 4; i++) {
+      final double a = _reticleSpin + i * math.pi * 0.5;
+      final Offset dir = Offset(math.cos(a), math.sin(a));
+      canvas.drawLine(dir * (r * 0.72), dir * (r * 0.92), tickPaint);
+    }
     canvas.restore();
   }
 }

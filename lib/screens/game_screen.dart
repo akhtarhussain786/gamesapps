@@ -6,12 +6,12 @@ import '../game/roadster_game.dart';
 import '../widgets/hud_overlay.dart';
 import '../widgets/virtual_joystick.dart';
 import '../widgets/flight_controls.dart';
-import '../widgets/status_chips_overlay.dart';
+import '../widgets/score_popups_overlay.dart';
 import '../widgets/pause_dialog.dart';
 import 'game_over_screen.dart';
 import 'splash_screen.dart';
 
-/// Active gameplay screen hosting Flame's 60fps canvas engine and HUD overlay widgets.
+/// Active gameplay screen hosting the Flame canvas and the HUD/control overlays.
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
 
@@ -19,24 +19,41 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
+class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   late final RoadsterGame _game;
   final Set<int> _activePointers = <int>{};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _game = RoadsterGame();
     GameController.instance.resetGame();
   }
 
-  void _pauseGame() {
-    GameController.instance.pauseGame();
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
-  void _resumeGame() {
-    GameController.instance.resumeGame();
+  /// Pause automatically when the app is backgrounded or a call comes in, so
+  /// the player doesn't return to a crashed run.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _activePointers.clear();
+      final c = GameController.instance;
+      c.setTouchActive(false);
+      c.setFlyHeld(false);
+      c.setJoystickSteer(0.0, false);
+      c.pauseGame();
+    }
   }
+
+  void _pauseGame() => GameController.instance.pauseGame();
+
+  void _resumeGame() => GameController.instance.resumeGame();
 
   void _restartGame() {
     _activePointers.clear();
@@ -57,79 +74,85 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  void _updateTouch() => GameController.instance.setTouchActive(_activePointers.isNotEmpty);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GameConstants.bgDark,
       body: Listener(
-        // Global multitouch tracker for Touch-To-Drive (Issue 2)
+        // Touch-to-drive: any finger on the screen keeps the throttle open.
         behavior: HitTestBehavior.translucent,
         onPointerDown: (e) {
           _activePointers.add(e.pointer);
-          GameController.instance.setTouchActive(_activePointers.isNotEmpty);
+          _updateTouch();
         },
         onPointerUp: (e) {
           _activePointers.remove(e.pointer);
-          GameController.instance.setTouchActive(_activePointers.isNotEmpty);
+          _updateTouch();
         },
         onPointerCancel: (e) {
           _activePointers.remove(e.pointer);
-          GameController.instance.setTouchActive(_activePointers.isNotEmpty);
+          _updateTouch();
         },
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. Flame Game Engine Canvas
+            // 1. Game canvas
             GameWidget(game: _game),
 
-            // 2. Top HUD Overlay (Score, Level, Distance, Pause button)
-            HudOverlay(onPausePressed: _pauseGame),
+            // 2. Reward popups above the car
+            const Positioned.fill(child: ScorePopupsOverlay()),
 
-            // 3. Tactical Warning Status Chips (Below HUD)
-            const StatusChipsOverlay(),
-
-            // 4. Bottom Controls: Virtual Joystick (Left) and Flight Controls (Right)
+            // 3. HUD (score, speed, pause, status chip)
             Positioned(
-              left: 20,
-              bottom: 24,
+              left: 0,
+              right: 0,
+              top: 0,
+              child: HudOverlay(onPausePressed: _pauseGame),
+            ),
+
+            // 4. Controls
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
               child: SafeArea(
-                child: AnimatedBuilder(
-                  animation: GameController.instance,
-                  builder: (context, _) {
-                    final isFrozen = GameController.instance.isGameOver || GameController.instance.isPaused;
-                    return IgnorePointer(
-                      ignoring: isFrozen,
-                      child: const VirtualJoystick(),
-                    );
-                  },
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10.0, 0.0, 14.0, 14.0),
+                  child: AnimatedBuilder(
+                    animation: GameController.instance,
+                    builder: (context, _) {
+                      final c = GameController.instance;
+                      final bool frozen = c.isGameOver || c.isPaused;
+                      return IgnorePointer(
+                        ignoring: frozen,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 200),
+                          opacity: c.isGameOver ? 0.0 : 1.0,
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              VirtualJoystick(),
+                              Spacer(),
+                              FlightControls(),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
 
-            Positioned(
-              right: 20,
-              bottom: 24,
-              child: SafeArea(
-                child: AnimatedBuilder(
-                  animation: GameController.instance,
-                  builder: (context, _) {
-                    final isFrozen = GameController.instance.isGameOver || GameController.instance.isPaused;
-                    return IgnorePointer(
-                      ignoring: isFrozen,
-                      child: const FlightControls(),
-                    );
-                  },
-                ),
-              ),
-            ),
-
-            // 5. Pause Modal Dialog Overlay
+            // 5. Pause menu
             AnimatedBuilder(
               animation: GameController.instance,
               builder: (context, _) {
-                if (!GameController.instance.isPaused || GameController.instance.isGameOver) {
-                  return const SizedBox.shrink();
-                }
+                final c = GameController.instance;
+                if (!c.isPaused || c.isGameOver) return const SizedBox.shrink();
                 return Container(
                   color: Colors.black.withValues(alpha: 0.65),
                   child: PauseDialog(
@@ -141,17 +164,12 @@ class _GameScreenState extends State<GameScreen> {
               },
             ),
 
-            // 6. Game Over Modal Overlay
+            // 6. Game over
             AnimatedBuilder(
               animation: GameController.instance,
               builder: (context, _) {
-                if (!GameController.instance.isGameOver) {
-                  return const SizedBox.shrink();
-                }
-                return GameOverScreen(
-                  onRetry: _restartGame,
-                  onHome: _quitToHome,
-                );
+                if (!GameController.instance.isGameOver) return const SizedBox.shrink();
+                return GameOverScreen(onRetry: _restartGame, onHome: _quitToHome);
               },
             ),
           ],
