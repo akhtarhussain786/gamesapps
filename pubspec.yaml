@@ -1,0 +1,24 @@
+name: roadster_rush
+description: "Roadster Rush - Futuristic Pseudo-3D Mobile Arcade Game"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flame: ^1.20.0
+  flame_audio: ^2.1.8
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+

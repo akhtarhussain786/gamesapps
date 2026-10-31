@@ -1,0 +1,12 @@
+{
+  "name": "ROADSTER RUSH",
+  "short_name": "RoadsterRush",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#060912",
+  "theme_color": "#00F0FF",
+  "description": "ROADSTER RUSH - Futuristic Pseudo-3D Arcade Game",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
+}
+
