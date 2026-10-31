@@ -2,135 +2,149 @@ import 'package:flutter/material.dart';
 import '../core/constants.dart';
 import '../core/theme.dart';
 import '../core/game_state.dart';
+import 'status_chips_overlay.dart';
 
-/// Top HUD Overlay: Top-left stats panel (zero-padded LCD score, level, progress bar, distance)
-/// and top-right round glass pause button.
+/// Top HUD: score card (score, level progress, distance) on the left, speed
+/// readout and pause button on the right, and the status chip centred below.
+/// Everything sits inside the SafeArea, so nothing collides with a notch.
 class HudOverlay extends StatelessWidget {
   final VoidCallback onPausePressed;
 
-  const HudOverlay({
-    super.key,
-    required this.onPausePressed,
-  });
+  const HudOverlay({super.key, required this.onPausePressed});
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Top-Left Statistics Panel
-            AnimatedBuilder(
-              animation: GameController.instance,
-              builder: (context, _) {
-                final controller = GameController.instance;
-                final String formattedScore = controller.score.toString().padLeft(5, '0');
-                final String formattedLevel = controller.level.toString().padLeft(2, '0');
-                final String formattedDistance = '${controller.distanceMeters} M';
-
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
-                  decoration: GameTheme.glassPanel(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Score & Level Row
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            formattedScore,
-                            style: GameTheme.lcdLarge,
-                          ),
-                          const SizedBox(width: 14),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
-                            decoration: BoxDecoration(
-                              color: GameConstants.neonCyan.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4.0),
-                              border: Border.all(
-                                color: GameConstants.neonCyan.withValues(alpha: 0.5),
-                                width: 1.0,
-                              ),
-                            ),
-                            child: Text(
-                              'LVL $formattedLevel',
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.2,
-                                color: GameConstants.neonCyan,
-                              ),
-                            ),
-                          ),
-                        ],
+        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 0.0),
+        child: AnimatedBuilder(
+          animation: GameController.instance,
+          builder: (context, _) {
+            final c = GameController.instance;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _ScoreCard(controller: c),
+                    const Spacer(),
+                    _SpeedCard(kmh: c.speedKmh),
+                    const SizedBox(width: 8),
+                    IgnorePointer(
+                      ignoring: c.isGameOver,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 150),
+                        opacity: c.isGameOver ? 0.0 : 1.0,
+                        child: _PauseButton(onTap: onPausePressed),
                       ),
-
-                      const SizedBox(height: 5),
-
-                      // Level Progress Bar
-                      SizedBox(
-                        width: 150,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2.0),
-                          child: LinearProgressIndicator(
-                            value: controller.levelProgress,
-                            backgroundColor: const Color(0xFF1E2838),
-                            valueColor: const AlwaysStoppedAnimation<Color>(GameConstants.neonCyan),
-                            minHeight: 3.5,
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 4),
-
-                      // Distance display
-                      Text(
-                        formattedDistance,
-                        style: GameTheme.lcdSmall,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            // Top-Right Circular Pause Button
-            GestureDetector(
-              onTap: onPausePressed,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xCC09101E),
-                  border: Border.all(
-                    color: GameConstants.neonCyan.withValues(alpha: 0.5),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: GameConstants.neonCyan.withValues(alpha: 0.2),
-                      blurRadius: 10.0,
                     ),
                   ],
                 ),
-                child: const Center(
-                  child: Icon(
-                    Icons.pause_rounded,
-                    color: Colors.white,
-                    size: 24,
+                const SizedBox(height: 10),
+                StatusChipsOverlay(chip: c.currentStatusChip),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ScoreCard extends StatelessWidget {
+  final GameController controller;
+  const _ScoreCard({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12.0, 9.0, 12.0, 10.0),
+      decoration: GameTheme.glassPanel(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('SCORE', style: GameTheme.caption),
+          const SizedBox(height: 5),
+          Text(c.score.toString().padLeft(6, '0'), style: GameTheme.numberLarge),
+          const SizedBox(height: 9),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 3.0),
+                decoration: BoxDecoration(
+                  color: GameConstants.neonCyan.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(4.0),
+                ),
+                child: Text(
+                  'LV ${c.level}',
+                  style: GameTheme.label.copyWith(fontSize: 12, color: GameConstants.neonCyan, letterSpacing: 1.0),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 72,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3.0),
+                  child: LinearProgressIndicator(
+                    value: c.levelProgress,
+                    backgroundColor: const Color(0xFF1C2638),
+                    valueColor: const AlwaysStoppedAnimation<Color>(GameConstants.neonCyan),
+                    minHeight: 6.0,
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(width: 8),
+              Text('${c.distanceMeters} m', style: GameTheme.numberSmall),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpeedCard extends StatelessWidget {
+  final int kmh;
+  const _SpeedCard({required this.kmh});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 68),
+      padding: const EdgeInsets.fromLTRB(10.0, 9.0, 10.0, 9.0),
+      decoration: GameTheme.glassPanel(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('KM/H', style: GameTheme.caption),
+          const SizedBox(height: 5),
+          Text('$kmh', style: GameTheme.numberMedium),
+        ],
+      ),
+    );
+  }
+}
+
+class _PauseButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _PauseButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: GameTheme.glassPanel(borderRadius: 24.0),
+        child: const Icon(Icons.pause_rounded, color: Colors.white, size: 26),
       ),
     );
   }

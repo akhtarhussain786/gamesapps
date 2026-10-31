@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flame/game.dart';
 import '../core/constants.dart';
 import '../core/game_state.dart';
+import '../core/theme.dart';
 import 'components/skyline_horizon.dart';
 import 'components/road_mesh.dart';
 import 'components/player_car.dart';
@@ -10,8 +11,11 @@ import 'components/traffic_cluster.dart';
 import 'components/landing_target.dart';
 import 'components/particles.dart';
 
-/// Central Game Engine implementing OutRun-style pseudo-3D perspective:
-/// Camera h = 1000, depth = 0.84, horizonY = size.height * 0.38.
+/// Central game engine: OutRun-style pseudo-3D road, traffic piles, flight.
+///
+/// The player lives in the same world as everything else: its rear bumper is
+/// [GameConstants.playerDepth] ahead of the camera, so the car is drawn exactly
+/// where collisions, overpasses and the landing reticle are evaluated.
 class RoadsterGame extends FlameGame {
   final GameController controller = GameController.instance;
 
@@ -29,6 +33,8 @@ class RoadsterGame extends FlameGame {
   double _slowMoTimer = 0.0;
   final math.Random _random = math.Random();
   bool _wasAirborne = false;
+
+  double get _playerWz => _camZ + GameConstants.playerDepth;
 
   @override
   Color backgroundColor() => GameConstants.bgDark;
@@ -57,14 +63,29 @@ class RoadsterGame extends FlameGame {
     _particles.reset();
   }
 
+  /// Screen placement of the player for the current frame.
+  PlayerPose _playerPose(Size screen) {
+    final double horizonY = screen.height * GameConstants.horizonYRatio;
+    const double depth = GameConstants.playerDepth;
+    const double scale = GameConstants.cameraDepth / depth;
+    final double altitude = controller.playerAltitude;
+    final double groundY = horizonY + scale * GameConstants.cameraHeight * (screen.height * 0.5);
+    final double carY = horizonY + scale * (GameConstants.cameraHeight - altitude) * (screen.height * 0.5);
+    return PlayerPose(
+      x: screen.width * 0.5,
+      groundY: groundY,
+      carY: carY,
+      width: scale * GameConstants.playerCarWidth * (screen.width * 0.5),
+      altitudeRatio: (altitude / GameConstants.maxFlightAltitude).clamp(0.0, 1.0),
+    );
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
 
-    // Issue 3: Pause pauses the update loop completely
     if (controller.isPaused) return;
 
-    // Issue 1: Clamp dt to max 1/30 so lag spikes never cause jumps
     double clampedDt = math.min(dt, GameConstants.maxDeltaTime);
 
     // Slow-mo on crash
@@ -79,24 +100,20 @@ class RoadsterGame extends FlameGame {
       _shakeIntensity = math.max(0.0, _shakeIntensity - clampedDt * 25.0);
     }
 
-    // Camera moves forward with distance
     _camZ = controller.distance;
 
-    // Issue 3: Lateral speed = steerSmoothed * 900 * dt, clamp cam.x to [-roadHalfWidth+200, roadHalfWidth-200]
     _camX += controller.steerSmoothed * GameConstants.lateralSpeed * clampedDt;
     _camX = _camX.clamp(
       -GameConstants.roadHalfWidth + GameConstants.roadMargin,
       GameConstants.roadHalfWidth - GameConstants.roadMargin,
     );
 
-    // Update Player Car (tilts max ±8° based on steering)
     _playerCar.update(
       dt: clampedDt,
       steerSmoothed: controller.steerSmoothed,
       isFlying: controller.isFlying,
     );
 
-    // Update Road & Traffic
     _roadMesh.update(clampedDt);
     _trafficManager.update(
       dt: clampedDt,
@@ -104,73 +121,94 @@ class RoadsterGame extends FlameGame {
       level: controller.level,
     );
 
-    // Update Landing Target (projected on road at predicted touchdown Z)
+    final double playerWz = _playerWz;
+    final double playerWy = controller.playerAltitude;
+
     _landingTarget.update(
       dt: clampedDt,
       playerWx: _camX,
-      playerWy: controller.playerAltitude,
-      camZ: _camZ,
-      speed: controller.speed,
+      playerWy: playerWy,
+      playerVy: controller.playerVy,
+      playerWz: playerWz,
+      worldSpeed: controller.worldSpeed,
       trafficManager: _trafficManager,
     );
-    controller.setLandingSafety(_landingTarget.isSafe);
 
-    final double playerWz = _camZ + 750.0;
-    final double playerWy = controller.playerAltitude;
+    final bool running = !controller.isGameOver && !controller.isCountdownActive;
 
-    // Collision Detection
-    if (!controller.isGameOver && !controller.isCountdownActive) {
-      if (_trafficManager.checkCollision(
-        playerWx: _camX,
-        playerWy: playerWy,
-        playerWz: playerWz,
-      )) {
-        triggerCrash("COLLIDED WITH VEHICLE PILE");
-      } else if (_trafficManager.checkOverpass(
-        playerWx: _camX,
-        playerWy: playerWy,
-        playerWz: playerWz,
-      )) {
-        controller.triggerOverpassBonus();
+    if (running) {
+      controller.setLandingSafety(_landingTarget.isSafe);
+
+      if (_trafficManager.checkCollision(playerWx: _camX, playerWy: playerWy, playerWz: playerWz)) {
+        triggerCrash(_wasAirborne || playerWy > 0.0 ? 'CLIPPED A PILE IN MID-AIR' : 'COLLIDED WITH VEHICLE PILE');
+      } else {
+        final int cleared = _trafficManager.collectOverpasses(playerWx: _camX, playerWy: playerWy, playerWz: playerWz);
+        controller.triggerOverpassBonus(cleared);
       }
     }
 
-    // Landing Touchdown Detection
-    final bool isAirborne = playerWy > 20.0;
+    // Touchdown: a clean landing (a crash on landing is caught by the
+    // collision test above, which uses the same hit box).
+    final bool isAirborne = controller.isAirborne;
     if (_wasAirborne && !isAirborne && !controller.isGameOver) {
-      if (_landingTarget.isSafe) {
-        controller.triggerLandingBonus();
-        _shakeIntensity = 8.0;
-      } else {
-        triggerCrash("CRASHED ON HAZARD DURING LANDING");
-      }
+      controller.handleTouchdown();
+      _shakeIntensity = 6.0;
     }
     _wasAirborne = isAirborne;
 
-    // Tactical Alert Chips
-    if (!controller.isGameOver && !isAirborne && !controller.isCountdownActive) {
-      final double? distToStack = _trafficManager.getDistanceToNextStack(_camZ);
-      if (distToStack != null && distToStack < 1200.0) {
-        final int distMeters = (distToStack * 0.05).toInt();
-        if (distToStack < 450.0) {
-          controller.showStatusChip("HOLD FLY", StatusDotColor.cyan, 0.6);
-        } else {
-          controller.showStatusChip("STACK AHEAD ${distMeters}M", StatusDotColor.yellow, 0.6);
-        }
+    if (running) {
+      _updateHazardCues(playerWz, playerWy, isAirborne);
+    } else {
+      controller.setFlyCue(false);
+    }
+
+    // Particles
+    final Size screen = size.toSize();
+    final PlayerPose pose = _playerPose(screen);
+    _particles.update(clampedDt, screen, controller.isFlying);
+
+    if (!controller.isGameOver) {
+      if (controller.isFlying) {
+        _particles.emitThrusterSparks(left: pose.nozzleLeft, right: pose.nozzleRight, count: 2);
+      } else if (controller.speed > 5.0 && !isAirborne) {
+        _particles.emitTireSmoke(
+          screenX: pose.x,
+          groundY: pose.groundY,
+          carWidth: pose.width,
+          steerInput: controller.steerSmoothed,
+        );
       }
     }
+  }
 
-    // Update Particles
-    _particles.update(clampedDt, size.toSize(), controller.isFlying);
+  /// "PILE AHEAD" / "FLY NOW" based on time-to-impact in the player's lane.
+  void _updateHazardCues(double playerWz, double playerWy, bool isAirborne) {
+    final ObstacleAhead? next = _trafficManager.nextObstacleInPath(playerWx: _camX, playerWz: playerWz);
+    final double v = math.max(controller.worldSpeed, 1.0);
+    bool cue = false;
 
-    final double screenX = size.x * 0.5;
-    final double carScreenY = (size.y * 0.70) - ((playerWy / GameConstants.maxFlightAltitude).clamp(0.0, 1.0) * size.y * 0.28);
+    if (next != null && next.distance > 0.0 && playerWy < next.clearance) {
+      // Time until the pile enters the hit window in front of the car.
+      final double t = math.max(0.0, next.distance - GameConstants.hitDepthAhead) / v;
+      // Time to climb from the current altitude to the pile's top under full lift.
+      final double climb = math.sqrt(2.0 * math.max(0.0, next.clearance - playerWy) / GameConstants.flightLiftAccel);
 
-    if (controller.isFlying) {
-      _particles.emitThrusterSparks(screenX: screenX, screenY: carScreenY, count: 2);
-    } else if (controller.speed > 5.0 && !controller.isGameOver) {
-      _particles.emitTireSmoke(screenX: screenX, screenY: size.y * 0.70, steerInput: controller.steerSmoothed);
+      if (t < climb + 0.45) {
+        cue = true;
+        controller.showStatusChip('stack', 'FLY NOW!', ChipTone.danger, duration: 0.3, priority: ChipPriority.warning);
+      } else if (t < 2.4 && !isAirborne) {
+        final int meters = (next.distance * GameConstants.metresPerWorldUnit).round();
+        final int cars = (next.clearance / GameConstants.carStackHeight).round();
+        controller.showStatusChip(
+          'stack',
+          cars > 1 ? 'PILE AHEAD  ${meters}M  ·  $cars HIGH' : 'PILE AHEAD  ${meters}M',
+          ChipTone.caution,
+          duration: 0.3,
+          priority: ChipPriority.info,
+        );
+      }
     }
+    controller.setFlyCue(cue);
   }
 
   void triggerCrash(String reason) {
@@ -179,9 +217,8 @@ class RoadsterGame extends FlameGame {
     _shakeIntensity = 24.0;
     _slowMoTimer = 0.85;
 
-    final double screenX = size.x * 0.5;
-    final double carScreenY = (size.y * 0.70) - ((controller.playerAltitude / GameConstants.maxFlightAltitude).clamp(0.0, 1.0) * size.y * 0.28);
-    _particles.emitCrashExplosion(screenX: screenX, screenY: carScreenY);
+    final PlayerPose pose = _playerPose(size.toSize());
+    _particles.emitCrashExplosion(screenX: pose.x, screenY: pose.carY - pose.height * 0.4);
   }
 
   @override
@@ -197,15 +234,10 @@ class RoadsterGame extends FlameGame {
       canvas.translate(sx, sy);
     }
 
-    // 1. BACKGROUND (Sky gradient -> Horizon fog -> Parallax skyline)
-    _skyline.render(
-      canvas: canvas,
-      size: screenSize,
-      camX: _camX,
-      horizonY: horizonY,
-    );
+    // 1. Sky & skyline
+    _skyline.render(canvas: canvas, size: screenSize, camX: _camX, horizonY: horizonY);
 
-    // 2. ROAD (Trapezoids Far to Near, curbs, grass, dashed lines, billboards)
+    // 2. Road
     _roadMesh.render(
       canvas: canvas,
       size: screenSize,
@@ -216,7 +248,7 @@ class RoadsterGame extends FlameGame {
       currentLevel: controller.level,
     );
 
-    // 3. LANDING TARGET RING (Projected on road at predicted landing Z)
+    // 3. Landing reticle (on the road surface)
     _landingTarget.render(
       canvas: canvas,
       size: screenSize,
@@ -224,11 +256,11 @@ class RoadsterGame extends FlameGame {
       camZ: _camZ,
       horizonY: horizonY,
       playerWx: _camX,
-      playerWy: controller.playerAltitude,
       roadMesh: _roadMesh,
     );
 
-    // 4. TRAFFIC CARS (Straight rear-view, clean rows in lanes, drawCar)
+    // 4. Traffic further away than the player
+    final double playerWz = _playerWz;
     _trafficManager.render(
       canvas: canvas,
       size: screenSize,
@@ -236,23 +268,33 @@ class RoadsterGame extends FlameGame {
       camZ: _camZ,
       horizonY: horizonY,
       roadMesh: _roadMesh,
+      minWz: playerWz,
     );
 
-    // 5. PLAYER CAR (Fixed bottom-center, rear-view, underglow, max ±8° tilt)
+    // 5. Player
     _playerCar.render(
       canvas: canvas,
-      size: screenSize,
-      wy: controller.playerAltitude,
+      pose: _playerPose(screenSize),
       flipAngle: controller.flipAngle,
-      isFlying: controller.isFlying,
       isFlipping: controller.isFlipping,
     );
 
-    // 6. PARTICLES
+    // 6. Traffic between the player and the camera (drawn over the player)
+    _trafficManager.render(
+      canvas: canvas,
+      size: screenSize,
+      camX: _camX,
+      camZ: _camZ,
+      horizonY: horizonY,
+      roadMesh: _roadMesh,
+      maxWz: playerWz,
+    );
+
+    // 7. Particles
     _particles.render(canvas);
 
-    // 7. COUNTDOWN OVERLAY (3-2-1-GO! before run starts)
-    if (controller.isCountdownActive || controller.countdownText.isNotEmpty) {
+    // 8. Countdown
+    if (controller.countdownText.isNotEmpty) {
       _drawCountdown(canvas, screenSize);
     }
   }
@@ -260,58 +302,47 @@ class RoadsterGame extends FlameGame {
   void _drawCountdown(Canvas canvas, Size size) {
     final String text = controller.countdownText;
     if (text.isEmpty) return;
-
-    final textSpan = TextSpan(
-      text: text,
-      style: TextStyle(
-        fontFamily: 'monospace',
-        fontSize: text == 'GO!' ? 72 : 84,
-        fontWeight: FontWeight.w900,
-        letterSpacing: 4.0,
-        color: text == 'GO!' ? GameConstants.neonGreen : GameConstants.neonCyan,
-        shadows: [
-          Shadow(
-            color: text == 'GO!' ? GameConstants.neonGreen : GameConstants.neonCyan,
-            blurRadius: 28.0,
-          ),
-          const Shadow(
-            color: Colors.white,
-            blurRadius: 10.0,
-          ),
-        ],
-      ),
-    );
+    final bool go = text == 'GO!';
+    final Color color = go ? GameConstants.neonGreen : Colors.white;
 
     final textPainter = TextPainter(
-      text: textSpan,
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontFamily: GameFonts.display,
+          fontSize: go ? 76 : 96,
+          fontStyle: FontStyle.italic,
+          letterSpacing: 2.0,
+          color: color,
+          shadows: [
+            Shadow(color: (go ? GameConstants.neonGreen : GameConstants.neonCyan).withValues(alpha: 0.8), blurRadius: 24.0),
+            const Shadow(color: Color(0xAA000000), blurRadius: 4.0, offset: Offset(0, 4)),
+          ],
+        ),
+      ),
       textAlign: TextAlign.center,
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final Offset center = Offset(
-      (size.width - textPainter.width) * 0.5,
-      (size.height * 0.42) - (textPainter.height * 0.5),
-    );
+    final double cy = size.height * 0.44;
+    textPainter.paint(canvas, Offset((size.width - textPainter.width) * 0.5, cy - textPainter.height * 0.5));
 
-    // Dark translucent glow pill behind countdown
-    final Rect pillRect = Rect.fromCenter(
-      center: Offset(size.width * 0.5, size.height * 0.42),
-      width: textPainter.width + 56.0,
-      height: textPainter.height + 24.0,
-    );
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(pillRect, const Radius.circular(20.0)),
-      Paint()..color = const Color(0xCC070E1A),
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(pillRect, const Radius.circular(20.0)),
-      Paint()
-        ..color = (text == 'GO!' ? GameConstants.neonGreen : GameConstants.neonCyan).withValues(alpha: 0.6)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0,
-    );
-
-    textPainter.paint(canvas, center);
+    if (!go) {
+      final hint = TextPainter(
+        text: const TextSpan(
+          text: 'HOLD ANYWHERE TO DRIVE',
+          style: TextStyle(
+            fontFamily: GameFonts.ui,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2.4,
+            color: Color(0xE6FFFFFF),
+            shadows: [Shadow(color: Color(0xCC000000), blurRadius: 6.0)],
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      hint.paint(canvas, Offset((size.width - hint.width) * 0.5, cy + textPainter.height * 0.5 + 8.0));
+    }
   }
 }

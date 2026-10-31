@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,7 +14,6 @@ class AudioManager {
   bool get isSoundEnabled => _isSoundEnabled;
 
   bool _initialized = false;
-  Timer? _engineLoopTimer;
   double _currentSpeedRatio = 0.5;
   bool _isFlying = false;
 
@@ -39,9 +37,6 @@ class AudioManager {
       await prefs.setBool(GameConstants.keySoundEnabled, enabled);
     } catch (e) {
       debugPrint('Error saving sound preference: $e');
-    }
-    if (!enabled) {
-      stopEngine();
     }
   }
 
@@ -68,33 +63,20 @@ class AudioManager {
     } catch (_) {}
   }
 
-  // --- Dynamic Engine Simulation ---
-  void startEngine() {
-    if (!_isSoundEnabled) return;
-    _engineLoopTimer?.cancel();
-    // Subtle rhythmic audio tick / click simulation when on mobile
-    _engineLoopTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) {
-      if (!_isSoundEnabled) {
-        timer.cancel();
-        return;
-      }
-      // Simulate engine pulsation through light audio clicks
-      if (!_isFlying && _currentSpeedRatio > 0.1) {
-        // Light system click for engine rpm rhythm
-        // Kept non-intrusive and responsive
-      }
-    });
-  }
+  // --- Engine state ---
+  // There are no engine audio assets yet; these hooks only track state so a
+  // looping engine sample can be plugged in later without touching callers.
+  void startEngine() {}
 
   void updateEnginePitch(double speedRatio, bool flying) {
     _currentSpeedRatio = speedRatio.clamp(0.0, 1.5);
     _isFlying = flying;
   }
 
-  void stopEngine() {
-    _engineLoopTimer?.cancel();
-    _engineLoopTimer = null;
-  }
+  double get engineSpeedRatio => _currentSpeedRatio;
+  bool get engineFlying => _isFlying;
+
+  void stopEngine() {}
 
   // --- SFX Events ---
   void playWhoosh() {
@@ -122,7 +104,9 @@ class AudioManager {
   }
 
   void playCrash() {
+    // Haptics always fire on a crash, but the sound respects the toggle.
     triggerHapticHeavy();
+    if (!_isSoundEnabled) return;
     try {
       SystemSound.play(SystemSoundType.alert);
     } catch (_) {}
@@ -144,8 +128,6 @@ class AudioManager {
     } catch (_) {}
   }
 
-  void dispose() {
-    stopEngine();
-  }
+  void dispose() {}
 }
 

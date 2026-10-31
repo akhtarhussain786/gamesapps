@@ -1,103 +1,70 @@
 import 'package:flutter/material.dart';
-import '../core/constants.dart';
 import '../core/game_state.dart';
+import '../core/theme.dart';
 
-/// Floating dynamic status chips placed under the top HUD bar.
-/// Displays tactical road alerts with pulsating colored indicator dots.
+/// The single tactical alert chip shown under the HUD.
+///
+/// It is keyed by the chip's *id*, not its text, so a countdown such as
+/// "PILE AHEAD 42M -> 41M -> 40M" updates in place instead of re-playing the
+/// enter animation several times a second.
 class StatusChipsOverlay extends StatelessWidget {
-  const StatusChipsOverlay({super.key});
+  final StatusChipInfo? chip;
 
-  Color _resolveDotColor(StatusDotColor color) {
-    switch (color) {
-      case StatusDotColor.green:
-        return GameConstants.neonGreen;
-      case StatusDotColor.yellow:
-        return GameConstants.neonYellow;
-      case StatusDotColor.red:
-        return GameConstants.neonRed;
-      case StatusDotColor.cyan:
-        return GameConstants.neonCyan;
-    }
-  }
+  const StatusChipsOverlay({super.key, required this.chip});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: GameController.instance,
-      builder: (context, _) {
-        final chip = GameController.instance.currentStatusChip;
+    final StatusChipInfo? chip = this.chip;
 
-        return Positioned(
-          top: 96,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
-                    child: child,
-                  ),
-                );
-              },
-              child: (chip != null)
-                  ? Container(
-                      key: ValueKey(chip.text),
-                      padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
-                      decoration: BoxDecoration(
-                        color: const Color(0xEE081224),
-                        borderRadius: BorderRadius.circular(20.0),
-                        border: Border.all(
-                          color: _resolveDotColor(chip.dotColor).withValues(alpha: 0.6),
-                          width: 1.2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _resolveDotColor(chip.dotColor).withValues(alpha: 0.25),
-                            blurRadius: 12.0,
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Pulsing Colored Indicator Dot
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _resolveDotColor(chip.dotColor),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: _resolveDotColor(chip.dotColor),
-                                  blurRadius: 6.0,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            chip.text,
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.5,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : const SizedBox.shrink(),
+    return Center(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.9, end: 1.0).animate(animation),
+              child: child,
             ),
+          );
+        },
+        child: chip == null
+            ? const SizedBox(key: ValueKey('none'), height: 34)
+            : _Chip(key: ValueKey(chip.id), text: chip.text, color: toneColor(chip.tone)),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _Chip({super.key, required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 14.0),
+      decoration: BoxDecoration(
+        color: const Color(0xEE0A1222),
+        borderRadius: BorderRadius.circular(17.0),
+        border: Border.all(color: color.withValues(alpha: 0.7), width: 1.2),
+        boxShadow: [BoxShadow(color: color.withValues(alpha: 0.22), blurRadius: 12.0)],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
           ),
-        );
-      },
+          const SizedBox(width: 8),
+          Text(text, style: GameTheme.label.copyWith(fontSize: 15, color: Colors.white)),
+        ],
+      ),
     );
   }
 }

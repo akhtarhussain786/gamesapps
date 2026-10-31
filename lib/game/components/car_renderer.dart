@@ -1,188 +1,133 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// Unified reusable car drawing function for both traffic and player roadster.
-/// Draws strict rear-view vehicles with shadow, wheels, lower body, cabin, rear window,
-/// glowing taillights, license plate, and optional player underglow & spoiler.
-void drawCar(Canvas c, Offset center, double w, Color body, {bool player = false}) {
-  final double h = w * 0.55;
+/// Height of a traffic car's rear-view artwork as a fraction of its width.
+const double trafficCarHeightRatio = 0.55;
 
-  // 1. Shadow: dark oval under car, width w * 1.1
-  final Paint shadowPaint = Paint()
-    ..color = Colors.black.withValues(alpha: 0.45)
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
-  c.drawOval(
-    Rect.fromCenter(
-      center: Offset(center.dx, center.dy + h * 0.48),
-      width: w * 1.1,
-      height: h * 0.26,
-    ),
-    shadowPaint,
-  );
+/// Draws a rear-view traffic car whose tyres touch the road at [ground]
+/// (bottom-centre). Traffic cars are deliberately plain, boxy sedans so the
+/// player's roadster is always easy to pick out.
+void drawTrafficCar(Canvas c, Offset ground, double w, Color body, {bool drawShadow = true}) {
+  final double x = ground.dx;
+  final double y = ground.dy;
+  final bool detailed = w > 28.0;
 
-  // 2. Player: neon cyan underglow (blur 14)
-  if (player) {
-    final Paint underglowPaint = Paint()
-      ..color = const Color(0xFF00F0FF).withValues(alpha: 0.65)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14.0);
+  // 1. Contact shadow
+  if (drawShadow) {
     c.drawOval(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + h * 0.42),
-        width: w * 1.15,
-        height: h * 0.38,
-      ),
-      underglowPaint,
+      Rect.fromCenter(center: Offset(x, y - w * 0.01), width: w * 1.06, height: w * 0.12),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.42)
+        ..maskFilter = detailed ? const MaskFilter.blur(BlurStyle.normal, 3.0) : null,
     );
   }
 
-  // 3. Wheels: 2 dark RRect at the bottom corners, size w * 0.18 x h * 0.28
-  final Paint wheelPaint = Paint()..color = const Color(0xFF141922);
-  final double wheelW = w * 0.18;
-  final double wheelH = h * 0.28;
-  final Radius wheelRadius = Radius.circular(w * 0.04);
-
-  // Left wheel
-  c.drawRRect(
-    RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset(center.dx - w * 0.38, center.dy + h * 0.36),
-        width: wheelW,
-        height: wheelH,
+  // 2. Tyres (visible below the bumper)
+  final Paint tyrePaint = Paint()..color = const Color(0xFF12161C);
+  final double tyreW = w * 0.17;
+  final double tyreH = w * 0.15;
+  for (final double side in const [-1.0, 1.0]) {
+    c.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x + side * (w * 0.47) - (side < 0 ? 0 : tyreW), y - tyreH, tyreW, tyreH),
+        Radius.circular(w * 0.03),
       ),
-      wheelRadius,
-    ),
-    wheelPaint,
-  );
+      tyrePaint,
+    );
+  }
 
-  // Right wheel
+  // 3. Rear panel
+  final Color bodyDark = Color.lerp(body, Colors.black, 0.28)!;
+  final Color bodyLight = Color.lerp(body, Colors.white, 0.18)!;
+  final double bodyBottom = y - w * 0.07;
+  final double bodyTop = y - w * 0.31;
+  final Rect panel = Rect.fromLTRB(x - w * 0.49, bodyTop, x + w * 0.49, bodyBottom);
   c.drawRRect(
-    RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset(center.dx + w * 0.38, center.dy + h * 0.36),
-        width: wheelW,
-        height: wheelH,
-      ),
-      wheelRadius,
-    ),
-    wheelPaint,
-  );
-
-  // 4. Lower body: RRect (width w, height h * 0.55) with body color, radius w * 0.08
-  final double bodyH = h * 0.55;
-  final double bodyTop = center.dy + h * 0.50 - bodyH;
-  c.drawRRect(
-    RRect.fromRectAndRadius(
-      Rect.fromLTWH(center.dx - w * 0.5, bodyTop, w, bodyH),
-      Radius.circular(w * 0.08),
-    ),
+    RRect.fromRectAndRadius(panel, Radius.circular(w * 0.07)),
     Paint()..color = body,
   );
-
-  // 5. Cabin: trapezoid Path above the body, width w * 0.7 -> w * 0.55, color body darkened 25%
-  final Color cabinColor = Color.fromARGB(
-    (body.a * 255.0).round().clamp(0, 255),
-    ((body.r * 255.0) * 0.75).round().clamp(0, 255),
-    ((body.g * 255.0) * 0.75).round().clamp(0, 255),
-    ((body.b * 255.0) * 0.75).round().clamp(0, 255),
-  );
-
-  final double cabinBottomW = w * 0.70;
-  final double cabinTopW = w * 0.55;
-  final double cabinBottomY = bodyTop + 2.0;
-  final double cabinTopY = center.dy - h * 0.50;
-
-  final Path cabinPath = Path()
-    ..moveTo(center.dx - cabinBottomW * 0.5, cabinBottomY)
-    ..lineTo(center.dx - cabinTopW * 0.5, cabinTopY)
-    ..lineTo(center.dx + cabinTopW * 0.5, cabinTopY)
-    ..lineTo(center.dx + cabinBottomW * 0.5, cabinBottomY)
-    ..close();
-
-  c.drawPath(cabinPath, Paint()..color = cabinColor);
-
-  // 6. Rear window: RRect inside the cabin, color 0xFF1B2733, with a light diagonal highlight
-  final double winW = cabinTopW * 0.90;
-  final double winH = (cabinBottomY - cabinTopY) * 0.75;
-  final Rect winRect = Rect.fromCenter(
-    center: Offset(center.dx, cabinTopY + winH * 0.65),
-    width: winW,
-    height: winH,
-  );
-
+  // Lower bumper band
   c.drawRRect(
-    RRect.fromRectAndRadius(winRect, Radius.circular(w * 0.04)),
-    Paint()..color = const Color(0xFF1B2733),
+    RRect.fromRectAndRadius(
+      Rect.fromLTRB(panel.left + w * 0.02, bodyBottom - w * 0.05, panel.right - w * 0.02, bodyBottom),
+      Radius.circular(w * 0.03),
+    ),
+    Paint()..color = bodyDark,
   );
 
-  // Diagonal window highlight
-  final Paint highlightPaint = Paint()
-    ..color = Colors.white.withValues(alpha: 0.18)
-    ..strokeWidth = 1.8;
-  c.drawLine(
-    Offset(winRect.left + winW * 0.25, winRect.bottom - 2),
-    Offset(winRect.left + winW * 0.55, winRect.top + 2),
-    highlightPaint,
-  );
+  // 4. Cabin (trapezoid) & rear window
+  final double cabinTop = y - w * trafficCarHeightRatio;
+  final Path cabin = Path()
+    ..moveTo(x - w * 0.40, bodyTop + 1.0)
+    ..lineTo(x - w * 0.30, cabinTop)
+    ..lineTo(x + w * 0.30, cabinTop)
+    ..lineTo(x + w * 0.40, bodyTop + 1.0)
+    ..close();
+  c.drawPath(cabin, Paint()..color = Color.lerp(body, Colors.black, 0.18)!);
 
-  // 7. Taillights: 2 red RRects (0xFFFF2D2D) at the body's two ends, with a glow (MaskFilter.blur 6)
-  final double tailW = w * 0.18;
-  final double tailH = bodyH * 0.32;
-  final double tailY = bodyTop + bodyH * 0.24;
-  final Radius tailRadius = Radius.circular(w * 0.04);
+  final Path window = Path()
+    ..moveTo(x - w * 0.34, bodyTop - w * 0.015)
+    ..lineTo(x - w * 0.27, cabinTop + w * 0.03)
+    ..lineTo(x + w * 0.27, cabinTop + w * 0.03)
+    ..lineTo(x + w * 0.34, bodyTop - w * 0.015)
+    ..close();
+  c.drawPath(window, Paint()..color = const Color(0xFF1A2430));
 
-  final Rect leftTailRect = Rect.fromLTWH(center.dx - w * 0.47, tailY, tailW, tailH);
-  final Rect rightTailRect = Rect.fromLTWH(center.dx + w * 0.47 - tailW, tailY, tailW, tailH);
-
-  // Taillight glow
-  final Paint tailGlowPaint = Paint()
-    ..color = const Color(0xFFFF2D2D)
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6.0);
-  c.drawRRect(RRect.fromRectAndRadius(leftTailRect, tailRadius), tailGlowPaint);
-  c.drawRRect(RRect.fromRectAndRadius(rightTailRect, tailRadius), tailGlowPaint);
-
-  // Taillight core
-  final Paint tailCorePaint = Paint()..color = const Color(0xFFFF2D2D);
-  c.drawRRect(RRect.fromRectAndRadius(leftTailRect, tailRadius), tailCorePaint);
-  c.drawRRect(RRect.fromRectAndRadius(rightTailRect, tailRadius), tailCorePaint);
-
-  // 8. License plate: small white rect in the center
-  final double plateW = w * 0.20;
-  final double plateH = bodyH * 0.26;
-  final Rect plateRect = Rect.fromCenter(
-    center: Offset(center.dx, bodyTop + bodyH * 0.62),
-    width: plateW,
-    height: plateH,
-  );
-  c.drawRect(plateRect, Paint()..color = const Color(0xFFFAFAFA));
-  c.drawRect(
-    plateRect,
-    Paint()
-      ..color = const Color(0xFF334155)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8,
-  );
-
-  // 9. Player: a thin spoiler line on top of the rear body
-  if (player) {
-    final Paint spoilerPaint = Paint()
-      ..color = const Color(0xFF0F172A)
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round;
-
-    final double spoilerY = bodyTop - 3.0;
+  if (detailed) {
+    // Roof highlight & window reflection
     c.drawLine(
-      Offset(center.dx - w * 0.46, spoilerY),
-      Offset(center.dx + w * 0.46, spoilerY),
-      spoilerPaint,
+      Offset(x - w * 0.28, cabinTop + 0.5),
+      Offset(x + w * 0.28, cabinTop + 0.5),
+      Paint()
+        ..color = bodyLight
+        ..strokeWidth = math.max(1.0, w * 0.012),
     );
-
-    // Cyan active accent line across spoiler
-    final Paint cyanTrim = Paint()
-      ..color = const Color(0xFF00F0FF)
-      ..strokeWidth = 1.2;
     c.drawLine(
-      Offset(center.dx - w * 0.40, spoilerY),
-      Offset(center.dx + w * 0.40, spoilerY),
-      cyanTrim,
+      Offset(x - w * 0.16, bodyTop - w * 0.03),
+      Offset(x - w * 0.04, cabinTop + w * 0.05),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.16)
+        ..strokeWidth = math.max(1.0, w * 0.02),
+    );
+  }
+
+  // 5. Taillights
+  final double tailY = bodyTop + w * 0.05;
+  final double tailW = w * 0.17;
+  final double tailH = w * 0.065;
+  const Color tail = Color(0xFFFF2D2D);
+  for (final double side in const [-1.0, 1.0]) {
+    final Rect r = Rect.fromLTWH(
+      side < 0 ? x - w * 0.45 : x + w * 0.45 - tailW,
+      tailY,
+      tailW,
+      tailH,
+    );
+    if (detailed) {
+      c.drawRRect(
+        RRect.fromRectAndRadius(r.inflate(w * 0.01), Radius.circular(w * 0.03)),
+        Paint()
+          ..color = tail.withValues(alpha: 0.6)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, math.max(1.5, w * 0.03)),
+      );
+    }
+    c.drawRRect(RRect.fromRectAndRadius(r, Radius.circular(w * 0.02)), Paint()..color = tail);
+  }
+
+  // 6. License plate
+  if (detailed) {
+    final Rect plate = Rect.fromCenter(
+      center: Offset(x, bodyBottom - w * 0.1),
+      width: w * 0.2,
+      height: w * 0.065,
+    );
+    c.drawRect(plate, Paint()..color = const Color(0xFFF2F4F7));
+    c.drawRect(
+      plate,
+      Paint()
+        ..color = const Color(0xFF334155)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.8,
     );
   }
 }
